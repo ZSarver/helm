@@ -24,6 +24,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State
 import Data.Bits
 import Data.Foldable (forM_)
+import Data.Text (pack)
 import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Foreign.Ptr
@@ -59,6 +60,7 @@ data Application = Application {
     game window and engine. -}
 data EngineConfig = EngineConfig {
   windowDimensions :: (Int, Int),
+  windowPosition :: (Int, Int),
   windowIsFullscreen :: Bool,
   windowIsResizable :: Bool,
   windowTitle :: String
@@ -69,6 +71,7 @@ data EngineConfig = EngineConfig {
 defaultConfig :: EngineConfig
 defaultConfig = EngineConfig {
   windowDimensions = (800, 600),
+  windowPosition = (0, 0),
   windowIsFullscreen = False,
   windowIsResizable = True,
   windowTitle = ""
@@ -77,7 +80,7 @@ defaultConfig = EngineConfig {
 {-| Creates a new engine that can be run later using 'run'. -}
 startup :: EngineConfig -> IO Engine
 startup (EngineConfig { .. }) = withCAString windowTitle $ \title -> do
-    window <- SDL.createWindow title 0 0 (fromIntegral w) (fromIntegral h) wflags
+    window <- SDL.createWindow title (fromIntegral x) (fromIntegral y) (fromIntegral w) (fromIntegral h) wflags
     renderer <- SDL.createRenderer window (-1) rflags
 
     return Engine { window   = window
@@ -88,10 +91,11 @@ startup (EngineConfig { .. }) = withCAString windowTitle $ \title -> do
 
   where
     (w, h) = windowDimensions
-    wflags = foldl (.|.) 0 $ [SDL.windowFlagShown] ++
-                             [SDL.windowFlagResizable | windowIsResizable] ++
-                             [SDL.windowFlagFullscreen | windowIsFullscreen]
-    rflags = (.|.) SDL.rendererFlagPresentVSync SDL.rendererFlagAccelerated
+    (x,y) = windowPosition
+    wflags = foldl (.|.) 0 $ [SDL.SDL_WINDOW_SHOWN] ++
+                             [SDL.SDL_WINDOW_RESIZABLE | windowIsResizable] ++
+                             [SDL.SDL_WINDOW_FULLSCREEN | windowIsFullscreen]
+    rflags = (.|.) SDL.SDL_RENDERER_PRESENTVSYNC SDL.SDL_RENDERER_ACCELERATED
 
 {-| Initializes and runs the game engine. The supplied signal generator is
     constantly sampled for an element to render until the user quits.
@@ -128,7 +132,7 @@ exposed = Signal getExposed
         event <- peek eventptr
 
         case event of
-          SDL.WindowEvent _ _ _ e _ _ -> return $ if e == SDL.windowEventExposed
+          SDL.WindowEvent _ _ _ e _ _ -> return $ if e == SDL.SDL_WINDOWEVENT_EXPOSED
                                                   then Changed ()
                                                   else Unchanged ()
           _ -> return $ Unchanged ()
@@ -170,7 +174,7 @@ render engine@(Engine { .. }) element (w, h) = alloca $ \pixelsptr ->
               (fromBE32 0x00ff0000) (fromBE32 0xff000000) (fromBE32 0x000000ff)
 
   texture <- SDL.createTexture renderer format
-               SDL.textureAccessStreaming (fromIntegral w) (fromIntegral h)
+               SDL.SDL_TEXTUREACCESS_STREAMING (fromIntegral w) (fromIntegral h)
 
   SDL.lockTexture texture nullPtr pixelsptr pitchptr
 
@@ -255,7 +259,7 @@ renderElement (ImageElement (sx, sy) sw sh src stretch) = do
                 Cairo.paint
             else
                 Cairo.fill
-                
+
             Cairo.restore
 
 renderElement (TextElement (Text { textColor = (Color r g b a), .. })) = do
@@ -264,7 +268,7 @@ renderElement (TextElement (Text { textColor = (Color r g b a), .. })) = do
     layout <- lift $ Pango.createLayout textUTF8
 
     Cairo.liftIO $ Pango.layoutSetAttributes layout
-      [ Pango.AttrFamily { paStart = i, paEnd = j, paFamily = textTypeface }
+      [ Pango.AttrFamily { paStart = i, paEnd = j, paFamily = Data.Text.pack textTypeface }
       , Pango.AttrWeight { paStart = i, paEnd = j, paWeight = mapFontWeight textWeight }
       , Pango.AttrStyle  { paStart = i, paEnd = j, paStyle = mapFontStyle textStyle }
       , Pango.AttrSize   { paStart = i, paEnd = j, paSize = textHeight }
